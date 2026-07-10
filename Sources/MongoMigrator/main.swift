@@ -377,21 +377,20 @@ actor MongoShellClient {
         environment["MONGO_MIGRATOR_DATABASE"] = database ?? "admin"
         process.environment = environment
         let output = Pipe()
-        let error = Pipe()
         let stdin = Pipe()
         process.standardOutput = output
-        process.standardError = error
+        process.standardError = output
         process.standardInput = stdin
         try process.run()
         if let input {
             try stdin.fileHandleForWriting.write(contentsOf: JSONEncoder().encode(input))
         }
         try stdin.fileHandleForWriting.close()
+        let outputData = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
-        let stdout = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        let stderr = String(decoding: error.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        let stdout = String(decoding: outputData, as: UTF8.self)
         guard let line = stdout.split(separator: "\n").last(where: { $0.hasPrefix(marker) }) else {
-            throw AppError.message(stderr.isEmpty ? stdout : stderr)
+            throw AppError.message(stdout.isEmpty ? "mongosh exited with status \(process.terminationStatus)" : stdout)
         }
         let payload = Data(line.dropFirst(marker.count).utf8)
         let response = try JSONDecoder().decode(ShellResponse.self, from: payload)
@@ -595,6 +594,13 @@ struct ProfileEditor: View {
 
 // MARK: - Compare UI
 
+struct ActivityLogEntry: Identifiable {
+    let id = UUID()
+    let timestamp: String
+    let message: String
+    let isError: Bool
+}
+
 @MainActor
 final class CompareViewModel: ObservableObject {
     @Published var sourceID: UUID?
@@ -621,6 +627,7 @@ final class CompareViewModel: ObservableObject {
     @Published var includeValidators = false
     @Published var includeIndexes = false
     @Published var schemaOperations: [JSONValue] = []
+    @Published var activityLog: [ActivityLogEntry] = []
     let client = MongoShellClient()
 
     var keyPaths: [String] {
@@ -631,8 +638,12 @@ final class CompareViewModel: ObservableObject {
     }
 
     func loadDatabases(profiles: [ConnectionProfile]) {
-        guard let source = profiles.first(where: { $0.id == sourceID }), let destination = profiles.first(where: { $0.id == destinationID }) else { return }
+        guard let source = profiles.first(where: { $0.id == sourceID }), let destination = profiles.first(where: { $0.id == destinationID }) else {
+            report("Choose both a source and destination connection.", isError: true)
+            return
+        }
         loading = true
+        report("Connecting to \(source.name) and \(destination.name)…")
         Task {
             do {
                 async let left = client.test(profile: source)
@@ -642,14 +653,22 @@ final class CompareViewModel: ObservableObject {
                 if sourceDatabase.isEmpty { sourceDatabase = sourceDatabases.first ?? "" }
                 if destinationDatabase.isEmpty { destinationDatabase = destinationDatabases.first ?? "" }
                 message = "Connections ready"
-            } catch { message = error.localizedDescription }
+                report("Connected. Source has \(sourceDatabases.count) databases; destination has \(destinationDatabases.count).")
+            } catch {
+                message = error.localizedDescription
+                report("Connection failed: \(error.localizedDescription)", isError: true)
+            }
             loading = false
         }
     }
 
     func loadCollections(profiles: [ConnectionProfile]) {
-        guard let source = profiles.first(where: { $0.id == sourceID }), let destination = profiles.first(where: { $0.id == destinationID }), !sourceDatabase.isEmpty, !destinationDatabase.isEmpty else { return }
+        guard let source = profiles.first(where: { $0.id == sourceID }), let destination = profiles.first(where: { $0.id == destinationID }), !sourceDatabase.isEmpty, !destinationDatabase.isEmpty else {
+            report("Connect and choose both databases before loading collections.", isError: true)
+            return
+        }
         loading = true
+        report("Loading shared collections from \(sourceDatabase) and \(destinationDatabase)…")
         Task {
             do {
                 async let left = client.collections(profile: source, database: sourceDatabase)
@@ -658,33 +677,59 @@ final class CompareViewModel: ObservableObject {
                 collections = shared.sorted()
                 selectedCollections = selectedCollections.intersection(shared)
                 message = "Found \(collections.count) matching collections"
-            } catch { message = error.localizedDescription }
+                report("Found \(collections.count) collections with matching names.")
+            } catch {
+                message = error.localizedDescription
+                report("Could not load collections: \(error.localizedDescription)", isError: true)
+            }
             loading = false
         }
     }
 
     func compare(profiles: [ConnectionProfile]) {
-        guard includeDocuments || includeValidators || includeIndexes else { message = "Select documents, validators, or indexes to compare."; return }
-        guard !includeDocuments || !keyPaths.isEmpty else { message = "Enter at least one matching field."; return }
-        guard let source = profiles.first(where: { $0.id == sourceID }), let destination = profiles.first(where: { $0.id == destinationID }), !selectedCollections.isEmpty else { return }
+        guard includeDocuments || includeValidators || includeIndexes else {
+            message = "Select documents, validators, or indexes to compare."
+            report(message, isError: true)
+            return
+        }
+        guard !includeDocuments || !keyPaths.isEmpty else {
+            message = "Enter at least one matching field."
+            report(message, isError: true)
+            return
+        }
+        guard let source = profiles.first(where: { $0.id == sourceID }), let destination = profiles.first(where: { $0.id == destinationID }), !selectedCollections.isEmpty else {
+            message = "Choose source, destination, and at least one collection."
+            report(message, isError: true)
+            return
+        }
         loading = true
         differences = []
         schemaOperations = []
         let ignored = Set(ignoredFields.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+        report("Starting comparison: \(source.name)/\(sourceDatabase) → \(destination.name)/\(destinationDatabase).")
         Task {
             do {
                 var result: [DocumentDifference] = []
                 var pendingSchema: [JSONValue] = []
-                for collection in selectedCollections.sorted() {
+                let orderedCollections = selectedCollections.sorted()
+                for (index, collection) in orderedCollections.enumerated() {
+                    message = "Comparing \(collection) (\(index + 1) of \(orderedCollections.count))"
+                    report(message)
                     if includeDocuments {
                         async let left = client.documents(profile: source, database: sourceDatabase, collection: collection, filter: filter, limit: limit)
                         async let right = client.documents(profile: destination, database: destinationDatabase, collection: collection, filter: filter, limit: limit)
-                        result += DiffEngine.compare(collection: collection, source: try await left, destination: try await right, keyPaths: keyPaths, ignoredPaths: ignored)
+                        let sourceDocuments = try await left
+                        let destinationDocuments = try await right
+                        let collectionDifferences = DiffEngine.compare(collection: collection, source: sourceDocuments, destination: destinationDocuments, keyPaths: keyPaths, ignoredPaths: ignored)
+                        result += collectionDifferences
+                        report("\(collection): read \(sourceDocuments.count) source and \(destinationDocuments.count) destination documents; found \(collectionDifferences.count) differences.")
                     }
                     if includeValidators || includeIndexes {
                         async let leftSchema = client.schema(profile: source, database: sourceDatabase, collection: collection)
                         async let rightSchema = client.schema(profile: destination, database: destinationDatabase, collection: collection)
-                        pendingSchema += makeSchemaOperations(collection: collection, source: try await leftSchema, destination: try await rightSchema)
+                        let collectionSchemaOperations = makeSchemaOperations(collection: collection, source: try await leftSchema, destination: try await rightSchema)
+                        pendingSchema += collectionSchemaOperations
+                        report("\(collection): found \(collectionSchemaOperations.count) validator/index differences.")
                     }
                 }
                 differences = result
@@ -692,7 +737,11 @@ final class CompareViewModel: ObservableObject {
                 selectedDifferenceID = result.first?.id
                 if result.isEmpty && pendingSchema.isEmpty { message = "No differences found" }
                 else { message = "Found \(result.count) document and \(pendingSchema.count) schema differences" }
-            } catch { message = error.localizedDescription }
+                report("Comparison finished. \(message).")
+            } catch {
+                message = error.localizedDescription
+                report("Comparison failed: \(error.localizedDescription)", isError: true)
+            }
             loading = false
         }
     }
@@ -709,6 +758,7 @@ final class CompareViewModel: ObservableObject {
         if dryRun {
             store.history.insert(HistoryEntry(date: Date(), source: source.name, destination: destination.name, database: "\(sourceDatabase) → \(destinationDatabase)", collections: selectedCollections.sorted(), dryRun: true, inserts: counts.0, updates: counts.1, deletions: counts.2, status: "Previewed"), at: 0)
             message = "Dry run: \(counts.0) inserts, \(counts.1) updates, \(counts.2) deletions"
+            report(message)
             return
         }
         let backupPath: String
@@ -716,17 +766,21 @@ final class CompareViewModel: ObservableObject {
             backupPath = try BackupStore.create(destination: destination, database: destinationDatabase, differences: differences)
         } catch {
             message = "Could not create the required rollback backup: \(error.localizedDescription)"
+            report(message, isError: true)
             return
         }
         loading = true
+        report("Applying migration: \(counts.0) inserts, \(counts.1) updates, \(counts.2) deletions.")
         Task {
             do {
                 _ = try await client.apply(profile: destination, database: destinationDatabase, operations: operations)
                 store.history.insert(HistoryEntry(date: Date(), source: source.name, destination: destination.name, database: "\(sourceDatabase) → \(destinationDatabase)", collections: selectedCollections.sorted(), dryRun: false, inserts: counts.0, updates: counts.1, deletions: counts.2, status: "Completed", backupPath: backupPath), at: 0)
                 message = "Migration completed"
+                report("Migration completed. Rollback backup: \(backupPath)")
             } catch {
                 store.history.insert(HistoryEntry(date: Date(), source: source.name, destination: destination.name, database: "\(sourceDatabase) → \(destinationDatabase)", collections: selectedCollections.sorted(), dryRun: false, inserts: counts.0, updates: counts.1, deletions: counts.2, status: "Failed: \(error.localizedDescription)", backupPath: backupPath), at: 0)
                 message = error.localizedDescription
+                report("Migration failed: \(error.localizedDescription)", isError: true)
             }
             loading = false
         }
@@ -734,6 +788,16 @@ final class CompareViewModel: ObservableObject {
 
     func confirmDeletion() {
         deletionWasConfirmed = true
+    }
+
+    func clearActivityLog() {
+        activityLog.removeAll()
+    }
+
+    private func report(_ text: String, isError: Bool = false) {
+        let timestamp = Date().formatted(date: .omitted, time: .standard)
+        activityLog.append(ActivityLogEntry(timestamp: timestamp, message: text, isError: isError))
+        if activityLog.count > 500 { activityLog.removeFirst(activityLog.count - 500) }
     }
 
     private func buildOperations() -> JSONValue {
@@ -809,6 +873,9 @@ struct CompareView: View {
             } else {
                 results
             }
+            Divider()
+            ActivityLogView(entries: model.activityLog, onClear: model.clearActivityLog)
+                .frame(height: 150)
             Divider()
             HStack {
                 if !model.message.isEmpty { Text(model.message).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
@@ -930,6 +997,63 @@ struct CompareView: View {
         Binding(get: { model.differences.first(where: { $0.id == id })?.action ?? .keepDestination }, set: { action in
             if let index = model.differences.firstIndex(where: { $0.id == id }) { model.differences[index].action = action }
         })
+    }
+}
+
+struct ActivityLogView: View {
+    let entries: [ActivityLogEntry]
+    let onClear: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Label("Activity Log", systemImage: "text.alignleft")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                Text("\(entries.count)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Clear", action: onClear)
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                    .disabled(entries.isEmpty)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            Divider()
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 4) {
+                        if entries.isEmpty {
+                            Text("Connection, comparison progress, and errors will appear here.")
+                                .foregroundStyle(.tertiary)
+                                .padding(.vertical, 6)
+                        }
+                        ForEach(entries) { entry in
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text(entry.timestamp)
+                                    .foregroundStyle(.tertiary)
+                                    .frame(width: 76, alignment: .leading)
+                                Text(entry.message)
+                                    .foregroundStyle(entry.isError ? .red : .primary)
+                                    .textSelection(.enabled)
+                            }
+                            .id(entry.id)
+                        }
+                    }
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                }
+                .onChange(of: entries.count) {
+                    if let lastID = entries.last?.id {
+                        withAnimation { proxy.scrollTo(lastID, anchor: .bottom) }
+                    }
+                }
+            }
+        }
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.35))
     }
 }
 

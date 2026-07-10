@@ -158,20 +158,18 @@ final class MongoShell {
         environment["MONGO_MIGRATOR_URI"] = uri
         environment["MONGO_MIGRATOR_DATABASE"] = database
         process.environment = environment
-        let stdout = Pipe(), stderr = Pipe(), stdin = Pipe()
+        let stdout = Pipe(), stdin = Pipe()
         process.standardOutput = stdout
-        process.standardError = stderr
+        process.standardError = stdout
         process.standardInput = stdin
         try process.run()
         try stdin.fileHandleForWriting.write(contentsOf: JSONSerialization.data(withJSONObject: input))
         try stdin.fileHandleForWriting.close()
         let outputData = stdout.fileHandleForReading.readDataToEndOfFile()
-        let errorData = stderr.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         let output = String(decoding: outputData, as: UTF8.self)
-        let errorOutput = String(decoding: errorData, as: UTF8.self)
         guard let line = output.split(separator: "\n").last(where: { $0.hasPrefix(marker) }) else {
-            throw MCPError.message(errorOutput.isEmpty ? output : errorOutput)
+            throw MCPError.message(output.isEmpty ? "mongosh exited with status \(process.terminationStatus)" : output)
         }
         let payload = Data(line.dropFirst(marker.count).utf8)
         guard let response = try JSONSerialization.jsonObject(with: payload) as? Object else { throw MCPError.message("Invalid mongosh response.") }
