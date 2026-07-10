@@ -25,7 +25,7 @@ enum SharedStore {
     static let keychainService = "com.team.MongoMigrator"
 
     static func profiles() throws -> [ConnectionProfile] {
-        let defaults = UserDefaults(suiteName: "com.team.MongoMigrator") ?? .standard
+        let defaults = UserDefaults.standard
         guard let data = defaults.data(forKey: "profiles") else { return [] }
         return try JSONDecoder().decode([ConnectionProfile].self, from: data)
     }

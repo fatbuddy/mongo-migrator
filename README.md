@@ -1,5 +1,9 @@
 # Mongo Migrator
 
+<p align="center">
+  <img src="Assets/AppIcon.png" alt="Mongo Migrator app icon" width="160">
+</p>
+
 Mongo Migrator is a native SwiftUI app for comparing and selectively synchronizing MongoDB data between environments. It supports local MongoDB deployments and MongoDB Atlas, stores credentials in macOS Keychain, and includes a local MCP server for AI coding agents such as Codex, Claude, and Pi.
 
 The app is designed for controlled, on-demand workflows such as:

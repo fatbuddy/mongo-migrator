@@ -230,7 +230,7 @@ enum AppError: LocalizedError {
 final class AppStore: ObservableObject {
     @Published var profiles: [ConnectionProfile] = [] { didSet { saveProfiles() } }
     @Published var history: [HistoryEntry] = [] { didSet { saveHistory() } }
-    private let defaults = UserDefaults(suiteName: "com.team.MongoMigrator") ?? .standard
+    private let defaults = UserDefaults.standard
 
     init() {
         if let data = defaults.data(forKey: "profiles"), let saved = try? JSONDecoder().decode([ConnectionProfile].self, from: data) {

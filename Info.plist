@@ -5,6 +5,7 @@
     <key>CFBundleDevelopmentRegion</key><string>en</string>
     <key>CFBundleDisplayName</key><string>Mongo Migrator</string>
     <key>CFBundleExecutable</key><string>MongoMigrator</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundleIdentifier</key><string>com.team.MongoMigrator</string>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleName</key><string>Mongo Migrator</string>
