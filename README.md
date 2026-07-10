@@ -225,4 +225,4 @@ Project layout:
 
 ## License
 
-No open-source license has been added. The repository is currently intended for internal team use.
+This project is licensed under the [GNU General Public License v3.0](LICENSE).
