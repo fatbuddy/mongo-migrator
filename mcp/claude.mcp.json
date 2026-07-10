@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "mongo-migrator": {
+      "command": "/Users/alvin/Documents/mongo-migrator/dist/Mongo Migrator.app/Contents/MacOS/MongoMigratorMCP",
+      "args": []
+    }
+  }
+}
