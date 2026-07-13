@@ -26,17 +26,38 @@ The app is designed for controlled, on-demand workflows such as:
 ### Comparison and migration
 
 - Compare one source database with one destination database.
+- Switch source and destination with one migration-direction button.
 - Select multiple shared collections in a migration.
-- Match documents by `_id`, a unique field, or a compound key.
-- Apply MongoDB filters and ignore environment-specific fields.
+- Choose matching collections from a searchable table.
+- Match documents with a dropdown populated from compatible MongoDB unique indexes, including `_id`, compound indexes, and partial unique indexes.
+- Automatically apply partial index filters, such as `{ "isDeleted": false }`, on both databases during comparison.
+- Apply an additional MongoDB filter and permanently exclude environment-specific fields or subdocuments from the migration.
 - Compare documents, collection validators, and indexes.
-- Review field-level and nested-field differences.
+- Review field-level and nested-field differences with inserted, modified, and deleted color states.
+- Open large fields and subdocuments in a full side-by-side, scrollable code-review diff with copy controls.
 - Choose whether to apply the source, keep the destination, or delete the destination document.
 - Select individual fields and subdocuments for updates.
+- Exclude a field from every document with one **Skip all** action.
 - Preview changes with dry-run mode.
 - Require explicit confirmation before deletions.
 - Create a local rollback backup before every applied migration.
-- Keep local migration history and MCP audit records.
+- Show comparison progress and errors in an activity log.
+- Restore the previous comparison configuration when the app is reopened.
+- Keep local migration history with full document details and MCP audit records.
+- Revert document changes from a completed applied migration directly from History.
+
+### Migration history and rollback
+
+History records the route, databases, collections, mode, status, and insert/update/delete counts for every preview and applied migration. New history records also retain per-document actions, identity filters, selected field paths, full before/after values, and schema operations for review.
+
+Select a History row to:
+
+- Inspect every affected document and open its complete before/after code-review diff.
+- Review the fields selected for migration and any validator or index operations.
+- Locate the JSON detail and rollback package stored on the Mac.
+- Revert a completed applied migration after explicit confirmation.
+
+Document rollback restores complete pre-migration destination documents and removes documents inserted by the migration. It requires the saved destination connection profile. Rollback can overwrite edits made after the original migration, so verify the destination and back it up before confirming. Validator and index operations are visible in History, but their previous definitions are not captured and cannot currently be reverted automatically.
 
 ### MCP server
 
@@ -94,10 +115,14 @@ The build uses ad-hoc code signing for internal team distribution. It is not not
 4. Open **Compare & Migrate**.
 5. Select the source and destination profiles, then connect.
 6. Select the source and destination databases and load their shared collections.
-7. Choose collections, document matching fields, ignored fields, filters, and migration categories.
-8. Compare the environments and review each document and field action.
-9. Run a dry-run preview.
-10. Disable dry-run mode and apply the migration when the preview is correct.
+7. Choose collections from the searchable collection table.
+8. Select a compatible unique index for each collection. A partial unique index automatically filters out records outside its partial expression.
+9. Enter any additional filter and list fields that must never migrate, such as `_id`, `policyId`, `createdAt`, or `updatedAt`.
+10. Compare the environments and monitor progress in the activity log.
+11. Review document actions and selected fields. Use **View** for a complete code-review diff or **Skip all** to exclude a field from every document.
+12. Run a dry-run preview.
+13. Disable dry-run mode and apply the migration when the preview is correct.
+14. Open **History** to inspect the saved migration details or revert document changes when necessary.
 
 Production connections are identified visually, but production writes do not currently require a separate role or administrator approval. Review the destination profile carefully before applying a plan.
 
@@ -167,6 +192,7 @@ MCP audit records are written to:
 - Migration plans are held in MCP server memory and expire after 30 minutes.
 - Applied migrations create local JSON rollback packages.
 - Deletions require a distinct `DELETE AND APPLY <plan-id>` confirmation.
+- Desktop rollback requires a second confirmation and is available only for completed, non-dry-run migrations with a readable backup and saved destination profile.
 
 Rollback backups are stored at:
 
@@ -183,8 +209,11 @@ Backups can contain sensitive destination data. Protect the macOS user account a
 - SSH tunnels, custom TLS certificate management, IAM, X.509, LDAP, and Kerberos are not included.
 - The desktop comparison limit is 5,000 documents per collection; MCP limits requests to 1,000 documents.
 - Collections must have matching names in both databases to appear in the desktop collection picker.
+- The desktop unique-index dropdown lists indexes whose fields and partial filter are compatible on both source and destination.
 - Index synchronization creates or updates source indexes but does not automatically remove destination-only indexes.
-- The app creates rollback packages but does not yet provide a one-click restore interface.
+- Desktop rollback restores document changes only. Previous validator and index definitions are not captured for automatic restoration.
+- Rollback replaces backed-up documents and can overwrite changes made after the migration being reverted.
+- Older history records created before document-detail snapshots were introduced may show summary data only.
 - The release bundle is intended for internal team use and is ad-hoc signed.
 
 ## Development
