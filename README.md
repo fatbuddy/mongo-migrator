@@ -6,6 +6,14 @@
 
 Mongo Migrator is a native SwiftUI app for comparing and selectively synchronizing MongoDB data between environments. It supports local MongoDB deployments and MongoDB Atlas, stores credentials in macOS Keychain, and includes a local MCP server for AI coding agents such as Codex, Claude, and Pi.
 
+## Download
+
+[Download Mongo Migrator 0.2.0 for Apple Silicon](https://github.com/fatbuddy/mongo-migrator/releases/download/v0.2.0/Mongo-Migrator-0.2.0-arm64.zip)
+
+Unzip the archive and move **Mongo Migrator.app** to `/Applications`. The internal-team build is ad-hoc signed but not Apple-notarized; on first launch, Control-click the app and choose **Open** if macOS displays an unidentified-developer warning.
+
+All published versions and release notes are available on the [GitHub Releases page](https://github.com/fatbuddy/mongo-migrator/releases).
+
 The app is designed for controlled, on-demand workflows such as:
 
 - Copying production configuration data back to staging.
