@@ -493,15 +493,30 @@ actor MongoShellClient {
         environment["MONGO_MIGRATOR_DATABASE"] = database ?? "admin"
         process.environment = environment
         let output = Pipe()
-        let stdin = Pipe()
         process.standardOutput = output
         process.standardError = output
-        process.standardInput = stdin
-        try process.run()
+
+        let inputData: Data
         if let input {
-            try stdin.fileHandleForWriting.write(contentsOf: JSONEncoder().encode(input))
+            inputData = try JSONEncoder().encode(input)
+        } else {
+            inputData = Data()
         }
-        try stdin.fileHandleForWriting.close()
+        let inputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mongo-migrator-stdin-\(UUID().uuidString)")
+        guard FileManager.default.createFile(
+            atPath: inputURL.path,
+            contents: inputData,
+            attributes: [.posixPermissions: 0o600]
+        ) else {
+            throw AppError.message("Could not prepare mongosh input")
+        }
+        defer { try? FileManager.default.removeItem(at: inputURL) }
+        let stdin = try FileHandle(forReadingFrom: inputURL)
+        defer { try? stdin.close() }
+        process.standardInput = stdin
+
+        try process.run()
         let outputData = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         let stdout = String(decoding: outputData, as: UTF8.self)
@@ -768,6 +783,7 @@ final class CompareViewModel: ObservableObject {
     @Published var filter = "{}" { didSet { persistConfiguration() } }
     @Published var limit = 1000 { didSet { persistConfiguration() } }
     @Published var differences: [DocumentDifference] = []
+    @Published private(set) var comparisonCompleted = false
     @Published var selectedDifferenceID: UUID?
     @Published var loading = false
     @Published var message = ""
@@ -872,6 +888,7 @@ final class CompareViewModel: ObservableObject {
         selectedDifferenceID = nil
         differences = []
         schemaOperations = []
+        comparisonCompleted = false
         message = "Migration direction switched"
         report("Switched migration direction: \(sourceDatabase) → \(destinationDatabase). Run Compare to refresh the results.")
     }
@@ -954,7 +971,7 @@ final class CompareViewModel: ObservableObject {
         }
     }
 
-    func compare(profiles: [ConnectionProfile]) {
+    func compare(profiles: [ConnectionProfile], synchronizedMessage: String? = nil) {
         guard includeDocuments || includeValidators || includeIndexes else {
             message = "Select documents, validators, or indexes to compare."
             report(message, isError: true)
@@ -971,6 +988,7 @@ final class CompareViewModel: ObservableObject {
             return
         }
         loading = true
+        comparisonCompleted = false
         selectedDifferenceID = nil
         differences = []
         schemaOperations = []
@@ -1012,10 +1030,17 @@ final class CompareViewModel: ObservableObject {
                 differences = result
                 schemaOperations = pendingSchema
                 selectedDifferenceID = result.first?.id
-                if result.isEmpty && pendingSchema.isEmpty { message = "No differences found" }
-                else { message = "Found \(result.count) document and \(pendingSchema.count) schema differences" }
+                comparisonCompleted = true
+                if result.isEmpty && pendingSchema.isEmpty {
+                    message = synchronizedMessage ?? "\(source.name) and \(destination.name) are in sync"
+                } else if synchronizedMessage != nil {
+                    message = "Migration completed, but found \(result.count) document and \(pendingSchema.count) schema differences"
+                } else {
+                    message = "Found \(result.count) document and \(pendingSchema.count) schema differences"
+                }
                 report("Comparison finished. \(message).")
             } catch {
+                comparisonCompleted = false
                 message = error.localizedDescription
                 report("Comparison failed: \(error.localizedDescription)", isError: true)
             }
@@ -1065,6 +1090,7 @@ final class CompareViewModel: ObservableObject {
         loading = true
         report("Applying migration: \(counts.0) inserts, \(counts.1) updates, \(counts.2) deletions.")
         Task {
+            var shouldVerify = false
             do {
                 _ = try await client.apply(profile: destination, database: destinationDatabase, operations: operations)
                 store.history.insert(HistoryEntry(
@@ -1086,6 +1112,7 @@ final class CompareViewModel: ObservableObject {
                 ), at: 0)
                 message = "Migration completed"
                 report("Migration completed. Rollback backup: \(backupPath)")
+                shouldVerify = true
             } catch {
                 store.history.insert(HistoryEntry(
                     date: Date(),
@@ -1108,6 +1135,13 @@ final class CompareViewModel: ObservableObject {
                 report("Migration failed: \(error.localizedDescription)", isError: true)
             }
             loading = false
+            if shouldVerify {
+                report("Rechecking source and destination after migration.")
+                compare(
+                    profiles: profiles,
+                    synchronizedMessage: "\(source.name) and \(destination.name) are in sync"
+                )
+            }
         }
     }
 
@@ -1295,7 +1329,25 @@ struct CompareView: View {
             Divider()
             Group {
                 if model.differences.isEmpty && model.schemaOperations.isEmpty {
-                    ContentUnavailableView(model.loading ? "Comparing…" : "Ready to compare", systemImage: "arrow.left.arrow.right", description: Text("Choose two saved connections, databases, and matching collections."))
+                    if model.loading {
+                        ContentUnavailableView(
+                            "Comparing…",
+                            systemImage: "arrow.left.arrow.right",
+                            description: Text("Checking the selected source and destination.")
+                        )
+                    } else if model.comparisonCompleted {
+                        ContentUnavailableView(
+                            model.message,
+                            systemImage: "checkmark.circle",
+                            description: Text("No document, validator, or index differences were found.")
+                        )
+                    } else {
+                        ContentUnavailableView(
+                            "Ready to compare",
+                            systemImage: "arrow.left.arrow.right",
+                            description: Text("Choose two saved connections, databases, and matching collections.")
+                        )
+                    }
                 } else {
                     results
                 }
@@ -1480,16 +1532,18 @@ struct CompareView: View {
                             ForEach(MigrationAction.allCases) { Text($0.rawValue).tag($0) }
                         }.labelsHidden()
                     }.width(160)
-                }.frame(minWidth: 520)
+                }
+                .frame(minWidth: 520, maxHeight: .infinity)
 
                 if let difference = model.differences.first(where: { $0.id == model.selectedDifferenceID }) {
                     DifferenceDetail(
                         difference: differenceBinding(for: difference),
                         onExcludeEverywhere: model.excludeFieldFromAllDocuments
                     )
-                        .frame(minWidth: 430)
+                    .frame(minWidth: 430, maxHeight: .infinity)
                 } else {
                     ContentUnavailableView("No document selected", systemImage: "doc.text.magnifyingglass")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

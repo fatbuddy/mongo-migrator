@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1 — 2026-07-14
+
+- Fixed intermittent `EAGAIN: resource temporarily unavailable, read` failures when sending migration operations to `mongosh`.
+- Added an automatic comparison after every successful migration.
+- Added a synchronized empty state that confirms when the source and destination have no remaining document or schema differences.
+- Added a warning when post-migration verification finds remaining differences.
+
 ## 0.2.0 — 2026-07-13
 
 - Added compatible unique-index selection, including compound and partial unique indexes.

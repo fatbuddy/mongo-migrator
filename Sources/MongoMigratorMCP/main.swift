@@ -342,7 +342,7 @@ final class MCPServer {
         return [
             "protocolVersion": version,
             "capabilities": ["tools": ["listChanged": false]],
-            "serverInfo": ["name": "mongo-migrator", "title": "Mongo Migrator", "version": "0.2.0", "description": "Compare and safely migrate MongoDB documents and schema using profiles saved by the Mongo Migrator macOS app."],
+            "serverInfo": ["name": "mongo-migrator", "title": "Mongo Migrator", "version": "0.2.1", "description": "Compare and safely migrate MongoDB documents and schema using profiles saved by the Mongo Migrator macOS app."],
             "instructions": "Use read-only comparison tools first. Writes require prepare_migration followed by apply_migration with the exact confirmation string and host/user approval."
         ]
     }

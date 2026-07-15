@@ -8,7 +8,7 @@ Mongo Migrator is a native SwiftUI app for comparing and selectively synchronizi
 
 ## Download
 
-[Download Mongo Migrator 0.2.0 for Apple Silicon](https://github.com/fatbuddy/mongo-migrator/releases/download/v0.2.0/Mongo-Migrator-0.2.0-arm64.zip)
+[Download Mongo Migrator 0.2.1 for Apple Silicon](https://github.com/fatbuddy/mongo-migrator/releases/download/v0.2.1/Mongo-Migrator-0.2.1-arm64.zip)
 
 Unzip the archive and move **Mongo Migrator.app** to `/Applications`. The internal-team build is ad-hoc signed but not Apple-notarized; on first launch, Control-click the app and choose **Open** if macOS displays an unidentified-developer warning.
 
@@ -49,6 +49,7 @@ The app is designed for controlled, on-demand workflows such as:
 - Preview changes with dry-run mode.
 - Require explicit confirmation before deletions.
 - Create a local rollback backup before every applied migration.
+- Automatically compare again after a migration and confirm when the source and destination are in sync.
 - Show comparison progress and errors in an activity log.
 - Restore the previous comparison configuration when the app is reopened.
 - Keep local migration history with full document details and MCP audit records.
@@ -129,7 +130,7 @@ The build uses ad-hoc code signing for internal team distribution. It is not not
 10. Compare the environments and monitor progress in the activity log.
 11. Review document actions and selected fields. Use **View** for a complete code-review diff or **Skip all** to exclude a field from every document.
 12. Run a dry-run preview.
-13. Disable dry-run mode and apply the migration when the preview is correct.
+13. Disable dry-run mode and apply the migration when the preview is correct. The app automatically compares again and reports whether the source and destination are in sync.
 14. Open **History** to inspect the saved migration details or revert document changes when necessary.
 
 Production connections are identified visually, but production writes do not currently require a separate role or administrator approval. Review the destination profile carefully before applying a plan.
